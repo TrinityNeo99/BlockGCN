@@ -1,3 +1,6 @@
+#  Copyright (c) 2024. IPCRC, Lab. Jiangnig Wei
+#  All rights reserved
+
 import numpy as np
 from torch.utils.data import Dataset
 from feeders import tools
@@ -58,7 +61,7 @@ class Feeder(Dataset):
         else:
             raise NotImplementedError('data split only supports train/test')
         N, T, _ = self.data.shape
-        self.data = self.data.reshape((N, T, 2, 25, 3)).transpose(0, 4, 1, 3, 2)
+        self.data = self.data.reshape((N, T, 2, 25, 3)).transpose(0, 4, 1, 3, 2)  # B C T V M
 
     def get_mean_map(self):
         data = self.data
@@ -89,7 +92,7 @@ class Feeder(Dataset):
             for v1, v2 in ntu_pairs:
                 bone_data_numpy[:, :, v1 - 1] = data_numpy[:, :, v1 - 1] - data_numpy[:, :, v2 - 1]
 
-        # keep spine center's trajectory !!! modified on July 4th, 2022
+            # keep spine center's trajectory !!! modified on July 4th, 2022
             bone_data_numpy[:, :, 20] = data_numpy[:, :, 20]
             data_numpy = bone_data_numpy
 
@@ -103,8 +106,6 @@ class Feeder(Dataset):
 
             data_numpy[:, :, 20] = trajectory
 
-
-
         if self.vel:
             data_numpy[:, :-1] = data_numpy[:, 1:] - data_numpy[:, :-1]
 
@@ -116,7 +117,6 @@ class Feeder(Dataset):
         rank = score.argsort()
         hit_top_k = [l in rank[i, -top_k:] for i, l in enumerate(self.label)]
         return sum(hit_top_k) * 1.0 / len(hit_top_k)
-
 
 
 def import_class(name):

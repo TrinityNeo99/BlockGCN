@@ -1,4 +1,8 @@
 #!/usr/bin/env python
+
+#  Copyright (c) 2024. IPCRC, Lab. Jiangnig Wei
+#  All rights reserved
+
 from __future__ import print_function
 import argparse
 import inspect
@@ -23,20 +27,18 @@ import yaml
 from tensorboardX import SummaryWriter
 from tqdm import tqdm
 # from cosine_lr_schedueler import CosineLRScheduler
-from torchlight import DictAction
+# from torchlight import DictAction
 import resource
 import copy
+
+
 # from torch import linalg as LA
-
-sys.path.insert(0, "~/anaconda3/envs/diffusion/lib/python3.8/site-packages/click")
-
-"https://github.com/ajbrock/BigGAN-PyTorch/blob/master/utils.py"
 
 
 def ema_update(source, target, decay=0.99, start_itr=20, itr=None):
     # If an iteration counter is provided and itr is less than the start itr,
     # peg the ema weights to the underlying weights.
-    if itr and itr<start_itr:
+    if itr and itr < start_itr:
         decay = 0.0
     # source = copy.deepcopy(source)
     with torch.no_grad():
@@ -48,6 +50,7 @@ def ema_update(source, target, decay=0.99, start_itr=20, itr=None):
 
 rlimit = resource.getrlimit(resource.RLIMIT_NOFILE)
 resource.setrlimit(resource.RLIMIT_NOFILE, (2048, rlimit[1]))
+
 
 def init_seed(seed):
     torch.cuda.manual_seed_all(seed)
@@ -62,6 +65,7 @@ def init_seed(seed):
     # unlike on cuda 10, the default works well
     torch.backends.cudnn.benchmark = True
 
+
 def import_class(import_str):
     mod_str, _sep, class_str = import_str.rpartition('.')
     __import__(mod_str)
@@ -69,6 +73,7 @@ def import_class(import_str):
         return getattr(sys.modules[mod_str], class_str)
     except AttributeError:
         raise ImportError('Class %s cannot be found (%s)' % (class_str, traceback.format_exception(*sys.exc_info())))
+
 
 def str2bool(v):
     if v.lower() in ('yes', 'true', 't', 'y', '1'):
@@ -88,8 +93,6 @@ def get_mmd_loss(z, z_prior, y, num_cls):
 
 
 def get_parser():
-
-
     # parameter priority: command line > config > default
     parser = argparse.ArgumentParser(
         description='GRA Transformer')
@@ -175,12 +178,12 @@ def get_parser():
         help='the number of worker for data loader')
     parser.add_argument(
         '--train-feeder-args',
-        action=DictAction,
+        # action=DictAction,
         default=dict(),
         help='the arguments of data loader for training')
     parser.add_argument(
         '--test-feeder-args',
-        action=DictAction,
+        # action=DictAction,
         default=dict(),
         help='the arguments of data loader for test')
 
@@ -188,7 +191,7 @@ def get_parser():
     parser.add_argument('--model', default=None, help='the model will be used')
     parser.add_argument(
         '--model-args',
-        action=DictAction,
+        # action=DictAction,
         default=dict(),
         help='the arguments of model')
     parser.add_argument(
@@ -214,7 +217,7 @@ def get_parser():
     parser.add_argument(
         '--device',
         type=int,
-        default=[0,1,2,3,4,5,6,7],
+        default=[0, 1, 2, 3, 4, 5, 6, 7],
         nargs='+',
         help='the indexes of GPUs for training or testing')
     parser.add_argument('--optimizer', default='SGD', help='type of optimizer')
@@ -306,7 +309,6 @@ class Processor():
             self.model_ema = Model(**self.arg.model_args).cuda(self.output_device)
             ema_update(self.model, self.model_ema, itr=0)
 
-
     def load_data(self):
         Feeder = import_class(self.arg.feeder)
         self.data_loader = dict()
@@ -368,6 +370,7 @@ class Processor():
                     print('  ' + d)
                 state.update(weights)
                 self.model.load_state_dict(state)
+        self.model.to(output_device)
 
     def load_optimizer(self):
         if self.arg.optimizer == 'SGD':
@@ -494,13 +497,13 @@ class Processor():
                 def forward(self, x, target):
                     # because p has already been passed through softmax !
                     # cross entropy is non-symetric!! the order matters!!!
-                    loss = -torch.sum(target * torch.log(x+1e-20), dim=-1)
+                    loss = -torch.sum(target * torch.log(x + 1e-20), dim=-1)
                     return loss.mean()
 
-
             with torch.cuda.amp.autocast(enabled=use_amp):
-
-                output, z = self.model(data, F.one_hot(label, num_classes=self.model.module.num_class), joint)
+                output, z = self.model(data.to(self.output_device),
+                                       F.one_hot(label, num_classes=self.model.num_class).to(self.output_device),
+                                       joint.to(self.output_device))
                 # output, z = self.model(data, F.one_hot(label, num_classes=self.model.num_class), joint)
 
                 ## for mmd loss
@@ -510,15 +513,11 @@ class Processor():
                 loss = self.loss(output, label)
             loss2 = torch.zeros_like(loss).cuda(loss.device)
 
-
-
             loss += loss2
-
 
             # # for mmd loss
             # lamb1, lamb2 = 1e-4, 1e-1
             # loss += lamb2 * mmd_loss + lamb1 * l2_z_mean
-
 
             # backward
             self.optimizer.zero_grad()
@@ -547,14 +546,17 @@ class Processor():
             for k, v in timer.items()
         }
         self.print_log(
-            '\tMean training loss: {:.4f}. loss2: {:.4f}. Mean training acc: {:.2f}%.'.format(np.mean(loss_value), np.mean(loss_value2), np.mean(acc_value)*100))
+            '\tMean training loss: {:.4f}. loss2: {:.4f}. Mean training acc: {:.2f}%.'.format(np.mean(loss_value),
+                                                                                              np.mean(loss_value2),
+                                                                                              np.mean(acc_value) * 100))
         self.print_log('\tTime consumption: [Data]{dataloader}, [Network]{model}'.format(**proportion))
 
         if save_model:
             state_dict = self.model.state_dict()
             weights = OrderedDict([[k.split('module.')[-1], v.cpu()] for k, v in state_dict.items()])
 
-            torch.save(weights, self.arg.model_saved_name + '-' + str(epoch+1) + '-' + str(int(self.global_step)) + '.pt')
+            torch.save(weights,
+                       self.arg.model_saved_name + '-' + str(epoch + 1) + '-' + str(int(self.global_step)) + '.pt')
 
     def eval(self, epoch, save_score=False, loader_name=['test'], wrong_file=None, result_file=None):
         if wrong_file is not None:
@@ -585,14 +587,15 @@ class Processor():
                     data = data.float().cuda(self.output_device)
                     label = label.long().cuda(self.output_device)
                     # for mmd
-                    output, y = self.model(data, F.one_hot(label, num_classes=self.model.module.num_class), joint)
+                    output, y = self.model(data.to(self.output_device),
+                                           F.one_hot(label, num_classes=self.model.num_class).to(self.output_device),
+                                           joint.to(self.output_device))
                     # output, y = self.model(data, F.one_hot(label, num_classes=self.model.num_class))
-
-
 
                     if arg.ema:
                         self.model_ema.cuda(self.output_device)
-                        output_ema, z_ema = self.model_ema(data, F.one_hot(label, num_classes=self.model.module.num_class))
+                        output_ema, z_ema = self.model_ema(data,
+                                                           F.one_hot(label, num_classes=self.model.module.num_class))
                         # output_ema, z_ema = self.model_ema(data,
                         #                                    F.one_hot(label, num_classes=self.model.num_class))
                     loss = self.loss(output, label)
@@ -715,12 +718,14 @@ class Processor():
         if self.arg.phase == 'train':
             self.print_log('Parameters:\n{}\n'.format(str(vars(self.arg))))
             self.global_step = self.arg.start_epoch * len(self.data_loader['train']) / self.arg.batch_size
+
             def count_parameters(model):
                 return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
             self.print_log(f'# Parameters: {count_parameters(self.model)}')
             for epoch in range(self.arg.start_epoch, self.arg.num_epoch):
                 save_model = (((epoch + 1) % self.arg.save_interval == 0) or (
-                        epoch + 1 == self.arg.num_epoch)) and (epoch+1) > self.arg.save_epoch
+                        epoch + 1 == self.arg.num_epoch)) and (epoch + 1) > self.arg.save_epoch
 
                 # self.lr_scheduler.step(epoch)
                 self.train(epoch, save_model=save_model)
@@ -729,11 +734,11 @@ class Processor():
                 self.eval(epoch, save_score=self.arg.save_score, loader_name=['test'])
 
             # test the best model
-            weights_path = glob.glob(os.path.join(self.arg.work_dir, 'runs-'+str(self.best_acc_epoch)+'*'))[0]
+            weights_path = glob.glob(os.path.join(self.arg.work_dir, 'runs-' + str(self.best_acc_epoch) + '*'))[0]
             weights = torch.load(weights_path)
             if type(self.arg.device) is list:
                 if len(self.arg.device) > 1:
-                    weights = OrderedDict([['module.'+k, v.cuda(self.output_device)] for k, v in weights.items()])
+                    weights = OrderedDict([['module.' + k, v.cuda(self.output_device)] for k, v in weights.items()])
             self.model.load_state_dict(weights)
 
             wf = weights_path.replace('.pt', '_wrong.txt')
@@ -741,7 +746,6 @@ class Processor():
             self.arg.print_log = False
             self.eval(epoch=0, save_score=True, loader_name=['test'], wrong_file=wf, result_file=rf)
             self.arg.print_log = True
-
 
             num_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
             self.print_log(f'Best accuracy: {self.best_acc}')
@@ -766,7 +770,6 @@ class Processor():
             # ind = torch.argmax(mask, dim=0)
             # print(ind)
 
-
             if self.arg.weights is None:
                 raise ValueError('Please appoint --weights.')
             self.arg.print_log = False
@@ -775,6 +778,7 @@ class Processor():
             self.eval(epoch=0, save_score=self.arg.save_score, loader_name=['test'], wrong_file=wf, result_file=rf)
             self.print_log('Done.\n')
 
+
 if __name__ == '__main__':
     parser = get_parser()
 
@@ -782,7 +786,7 @@ if __name__ == '__main__':
     p = parser.parse_args()
     if p.config is not None:
         with open(p.config, 'r') as f:
-            default_arg = yaml.load(f)
+            default_arg = yaml.safe_load(f)
         key = vars(p).keys()
         for k in default_arg.keys():
             if k not in key:
